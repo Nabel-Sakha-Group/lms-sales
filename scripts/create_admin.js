@@ -2,6 +2,8 @@
 // scripts/create_admin.js
 // Usage: SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/create_admin.js admin@example.com password123
 
+require('dotenv').config();
+
 const { createClient } = require('@supabase/supabase-js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -37,19 +39,36 @@ if (!email || !password) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 async function main() {
+  console.log(`\n📧 Creating admin user: ${email}`);
+  
   try {
     const { data, error } = await supabase.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
+      user_metadata: {
+        role: 'admin',
+        created_by: 'create_admin_script',
+      },
     });
+    
     if (error) throw error;
-    console.log('Admin user created:', data);
-    console.log('Now set ADMIN_EMAIL environment variable in your app to', email);
+    
+    console.log('✅ Admin user created successfully!');
+    console.log('👤 User ID:', data.user.id);
+    console.log('📧 Email:', data.user.email);
+    console.log('🔐 Role: admin');
+    console.log('✉️ Email Confirmed:', data.user.email_confirmed_at ? 'Yes' : 'No');
+    console.log('\n💡 Login credentials:');
+    console.log(`   Email: ${email}`);
+    console.log(`   Password: ${password}`);
+    console.log('\n✨ User akan otomatis dikenali sebagai admin berdasarkan:');
+    console.log('   1. User metadata role = "admin"');
+    console.log('   2. Email domain @nsg.com (jika ada)');
+    console.log('   3. Created via Supabase Auth');
   } catch (err) {
-    console.error('Error creating admin:', (err && err.message) || err);
-    // Provide a hint for common cause
-    console.error('Hint: "Invalid API key" likely means the provided SUPABASE_SERVICE_ROLE_KEY is incorrect, truncated, or for a different project.');
+    console.error('❌ Error creating admin:', (err && err.message) || err);
+    console.error('Hint: "Invalid API key" likely means SUPABASE_SERVICE_ROLE_KEY is incorrect or for different project.');
     process.exit(1);
   }
 }

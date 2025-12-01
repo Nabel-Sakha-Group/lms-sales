@@ -14,7 +14,7 @@
 
     "plugins": [],
 
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
 
     "userInterfaceStyle": "light",
@@ -26,13 +26,24 @@
     },
     "assetBundlePatterns": ["**/*"],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "requireFullScreen": false,
+      "orientation": ["landscape-left", "landscape-right", "portrait"],
+      "infoPlist": {
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "screenOrientation": "user",
+      "permissions": [
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_EXTERNAL_STORAGE"
+      ]
     }
   }
 }

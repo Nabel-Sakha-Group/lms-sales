@@ -5,15 +5,24 @@ import { NavigationContainer, DefaultTheme, Theme } from '@react-navigation/nati
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator, DrawerContentScrollView, DrawerItemList } from '@react-navigation/drawer';
 import { View, Text, TouchableOpacity } from 'react-native';
+import { useResponsive } from 'hooks/useResponsive';
+import { useOrientationLock } from 'hooks/useOrientationLock';
+import OrientationPrompt from 'components/OrientationPrompt';
 import LoginScreen from './screens/LoginScreen';
 import HomeScreen from './screens/HomeScreen';
 import ListScreen from './screens/ListScreen';
 import DownloadScreen from './screens/DownloadScreen';
 import AdminScreen from './screens/AdminScreen';
+import PdfViewerScreen from './screens/PdfViewerScreen';
+import PermissionManager from './components/PermissionManager';
 
 export type RootStackParamList = {
   Login: undefined;
   AppDrawer: undefined;
+  PdfViewer: {
+    uri: string;
+    name: string;
+  };
 };
 
 export type DrawerParamList = {
@@ -67,7 +76,16 @@ function RootNavigator() {
         {!user ? (
           <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
         ) : (
-          <Stack.Screen name="AppDrawer" component={AppDrawer} options={{ headerShown: false }} />
+          <>
+            <Stack.Screen name="AppDrawer" component={AppWithOrientationPrompt} options={{ headerShown: false }} />
+            <Stack.Screen
+              name="PdfViewer"
+              component={PdfViewerScreen}
+              options={{
+                headerShown: false,
+              }}
+            />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>
@@ -77,7 +95,9 @@ function RootNavigator() {
 export default function App() {
   return (
     <AuthProvider>
-      <RootNavigator />
+      <PermissionManager>
+        <RootNavigator />
+      </PermissionManager>
     </AuthProvider>
   );
 }
@@ -127,6 +147,14 @@ function CustomDrawerContent(props: any) {
 
 function AppDrawer() {
   const { isAdmin } = useAuth();
+  const { isTablet, isLandscape } = useResponsive();
+  
+  // Lock orientation for tablets
+  useOrientationLock();
+  
+  const drawerType = isTablet && isLandscape ? 'permanent' : 'front';
+  const drawerWidth = isTablet && isLandscape ? 280 : 300;
+  
   return (
     <Drawer.Navigator
       initialRouteName={isAdmin ? 'Admin' : 'Home'}
@@ -134,10 +162,15 @@ function AppDrawer() {
         headerStyle: { backgroundColor: '#1f2937' },
         headerTintColor: '#fff',
         headerTitleStyle: { color: '#fff' },
-        drawerStyle: { backgroundColor: '#0f172a' },
+        drawerStyle: { 
+          backgroundColor: '#0f172a',
+          width: drawerWidth,
+        },
+        drawerType,
         drawerActiveBackgroundColor: '#1f2937',
         drawerActiveTintColor: '#3b82f6',
         drawerInactiveTintColor: '#cbd5e1',
+        headerShown: !(isTablet && isLandscape), // Hide header on tablet landscape
       }}
       drawerContent={(props) => <CustomDrawerContent {...props} />}
     >
@@ -146,5 +179,14 @@ function AppDrawer() {
       <Drawer.Screen name="Download" component={DownloadScreen} options={{ title: 'Downloads' }} />
       <Drawer.Screen name="Admin" component={AdminScreen} options={{ title: 'Admin' }} />
     </Drawer.Navigator>
+  );
+}
+
+function AppWithOrientationPrompt() {
+  return (
+    <>
+      <AppDrawer />
+      <OrientationPrompt />
+    </>
   );
 }

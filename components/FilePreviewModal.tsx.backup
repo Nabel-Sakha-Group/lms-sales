@@ -1,0 +1,514 @@
+import React, { useState, useEffect } from 'react';
+import { Modal, View, Text, Pressable, StyleSheet, Dimensions, ScrollView, Image, Alert, Platform, ActivityIndicator } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
+import { WebView } from 'react-native-webview';
+import * as Sharing from 'expo-sharing';
+import * as IntentLauncher from 'expo-intent-launcher';
+import * as FileSystem from 'expo-file-system/legacy';
+
+interface FilePreviewModalProps {
+  visible: boolean;
+  onClose: () => void;
+  file: {
+    url: string;
+    name: string;
+    type: 'video' | 'image' | 'pdf' | 'document' | 'other';
+  } | null;
+}
+
+const { width, height } = Dimensions.get('window');
+
+export default function FilePreviewModal({ visible, onClose, file }: FilePreviewModalProps) {
+  const [loading, setLoading] = useState(false);
+  const [base64Content, setBase64Content] = useState<string | null>(null);
+
+  const handleOpenWithExternalApp = async () => {
+    if (!file) return;
+    try {
+      if (Platform.OS === 'ios') {
+        await Sharing.shareAsync(file.url);
+      } else {
+        // Android
+        const mimeType = getMimeType(file.name);
+        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+          data: file.url,
+          type: mimeType,
+          flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+        });
+      }
+    } catch (error) {
+      console.log('Error opening file:', error);
+      Alert.alert('Error', 'Cannot open this file type. The file has been downloaded to your device.');
+    }
+  };
+
+  const getMimeType = (filename: string): string => {
+    const extension = filename.split('.').pop()?.toLowerCase();
+    switch (extension) {
+      case 'pdf': return 'application/pdf';
+      case 'doc': return 'application/msword';
+      case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'xls': return 'application/vnd.ms-excel';
+      case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'ppt': return 'application/vnd.ms-powerpoint';
+      case 'pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      case 'jpg': case 'jpeg': return 'image/jpeg';
+      case 'png': return 'image/png';
+      case 'mp4': return 'video/mp4';
+      case 'mp3': return 'audio/mpeg';
+      default: return 'application/octet-stream';
+    }
+  };
+
+  const isLocalFile = file?.url.startsWith('file://') || false;
+
+  useEffect(() => {
+    if (!file) return;
+    console.log('FilePreviewModal useEffect:', { 
+      visible, 
+      isLocalFile, 
+      fileType: file.type, 
+      fileUrl: file.url 
+    });
+    
+    const loadLocalFile = async () => {
+      if (isLocalFile && (file.type === 'pdf' || file.type === 'document')) {
+        console.log('Starting to load local file:', file.url);
+        setLoading(true);
+        try {
+          // Check if file exists first
+          const fileInfo = await FileSystem.getInfoAsync(file.url);
+          console.log('File info:', fileInfo);
+          
+          if (!fileInfo.exists) {
+            console.error('File does not exist:', file.url);
+            Alert.alert('Error', 'File not found on device');
+            return;
+          }
+          
+          console.log('Reading file as base64...');
+          const base64 = await FileSystem.readAsStringAsync(file.url, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          console.log('Base64 length:', base64.length);
+          console.log('Base64 preview:', base64.substring(0, 50) + '...');
+          setBase64Content(base64);
+        } catch (error) {
+          console.error('Error reading local file:', error);
+          Alert.alert('Error', 'Failed to load local file: ' + (error instanceof Error ? error.message : String(error)));
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        console.log('Not a local PDF/document, clearing base64Content');
+        setBase64Content(null);
+      }
+    };
+
+    if (visible) {
+      loadLocalFile();
+    }
+  }, [visible, isLocalFile, file]);
+
+  const renderPreview = () => {
+    if (!file) return null;
+    switch (file.type) {
+      case 'video':
+        return (
+          <Video
+            source={{ uri: file!.url }}
+            style={styles.video}
+            useNativeControls
+            resizeMode={ResizeMode.CONTAIN}
+            shouldPlay
+          />
+        );
+
+      case 'image':
+        return (
+          <ScrollView 
+            maximumZoomScale={3}
+            minimumZoomScale={1}
+            contentContainerStyle={styles.imageContainer}
+          >
+            <Image
+              source={{ uri: file!.url }}
+              style={styles.image}
+              resizeMode="contain"
+            />
+          </ScrollView>
+        );
+
+      case 'pdf':
+        console.log('Rendering PDF:', { isLocalFile, loading, hasBase64: !!base64Content });
+        if (isLocalFile) {
+          if (loading) {
+            console.log('Showing loading state for PDF');
+            return (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#3b82f6" />
+                <Text style={styles.loadingText}>Loading PDF...</Text>
+              </View>
+            );
+          }
+          
+          // For local PDFs, show user-friendly interface instead of problematic WebView
+          if (base64Content) {
+            return (
+              <View style={styles.unsupportedContainer}>
+                <Text style={styles.unsupportedText}>📄</Text>
+                <Text style={styles.unsupportedTitle}>PDF Downloaded</Text>
+                <Text style={styles.unsupportedSubtitle}>{file!.name}</Text>
+                <Text style={styles.infoText}>File size: {(base64Content.length * 0.75 / 1024 / 1024).toFixed(1)} MB</Text>
+                <Text style={styles.infoText2}>This PDF has been downloaded to your device.</Text>
+                <Text style={styles.infoText2}>Tap below to open with your PDF app.</Text>
+                <Pressable 
+                  style={styles.downloadButton}
+                  onPress={handleOpenWithExternalApp}
+                >
+                  <Text style={styles.downloadButtonText}>Open PDF</Text>
+                </Pressable>
+              </View>
+            );
+                source={{
+                  html: `
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+                        <style>
+                          * { margin: 0; padding: 0; box-sizing: border-box; }
+                          body { 
+                            background: #2a2a2a; 
+                            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                            display: flex;
+                            flex-direction: column;
+                            height: 100vh;
+                            overflow: hidden;
+                          }
+                          .pdf-container {
+                            flex: 1;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            background: #1a1a1a;
+                          }
+                          embed, iframe, object {
+                            width: 100%;
+                            height: 100%;
+                            border: none;
+                          }
+                          .fallback {
+                            color: #fff;
+                            text-align: center;
+                            padding: 20px;
+                          }
+                          .open-btn {
+                            background: #3b82f6;
+                            color: white;
+                            border: none;
+                            padding: 12px 24px;
+                            border-radius: 8px;
+                            font-size: 16px;
+                            margin-top: 16px;
+                            cursor: pointer;
+                          }
+                        </style>
+                      </head>
+                      <body>
+                        <div class="pdf-container">
+                          <embed 
+                            src="data:application/pdf;base64,${base64Content}" 
+                            type="application/pdf" 
+                            width="100%" 
+                            height="100%"
+                          />
+                        </div>
+                        <script>
+                          // Fallback for devices that can't display PDF
+                          setTimeout(() => {
+                            const embed = document.querySelector('embed');
+                            if (!embed || embed.offsetHeight === 0) {
+                              document.body.innerHTML = \`
+                                <div class="fallback">
+                                  <h3>📄 PDF File Ready</h3>
+                                  <p>This PDF is downloaded and ready to view.</p>
+                                  <button class="open-btn" onclick="window.ReactNativeWebView.postMessage('openExternal')">Open with PDF App</button>
+                                </div>
+                              \`;
+                            }
+                          }, 2000);
+                        </script>
+                      </body>
+                    </html>
+                  `
+                }}
+                style={styles.webview}
+                onMessage={(event) => {
+                  if (event.nativeEvent.data === 'openExternal') {
+                    handleOpenWithExternalApp();
+                  }
+                }}
+                javaScriptEnabled
+                domStorageEnabled
+                allowFileAccess
+                allowUniversalAccessFromFileURLs
+              />
+            );
+          }
+          
+          // If no base64Content, show fallback
+          console.log('No base64Content available, showing fallback');
+          return (
+            <View style={styles.unsupportedContainer}>
+              <Text style={styles.unsupportedText}>📄</Text>
+              <Text style={styles.unsupportedTitle}>PDF Loading Issue</Text>
+              <Text style={styles.unsupportedSubtitle}>{file!.name}</Text>
+              <Text style={styles.infoText}>Could not load PDF content.</Text>
+              <Text style={styles.infoText2}>Try opening with external app.</Text>
+              <Pressable 
+                style={styles.downloadButton}
+                onPress={handleOpenWithExternalApp}
+              >
+                <Text style={styles.downloadButtonText}>Open with PDF App</Text>
+              </Pressable>
+            </View>
+          );
+        }
+        // Online PDF
+        return (
+          <WebView
+            source={{ uri: file!.url }}
+            style={styles.webview}
+            startInLoadingState
+            renderLoading={() => (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#3b82f6" />
+                <Text style={styles.loadingText}>Loading...</Text>
+              </View>
+            )}
+          />
+        );
+      
+      case 'document':
+        if (isLocalFile && base64Content) {
+          // Try to display document in WebView
+          return (
+            <WebView
+              source={{
+                html: `
+                  <html>
+                    <head>
+                      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                      <style>
+                        body { margin: 0; padding: 0; background: #f0f0f0; }
+                        .container { padding: 20px; text-align: center; }
+                        .download-btn { 
+                          background: #3b82f6; 
+                          color: white; 
+                          padding: 10px 20px; 
+                          border: none; 
+                          border-radius: 5px; 
+                          font-size: 16px;
+                          cursor: pointer;
+                        }
+                      </style>
+                    </head>
+                    <body>
+                      <div class="container">
+                        <h3>📄 ${file!.name}</h3>
+                        <p>This document has been downloaded to your device.</p>
+                        <button class="download-btn" onclick="window.ReactNativeWebView.postMessage('openExternal')">Open with External App</button>
+                      </div>
+                    </body>
+                  </html>
+                `
+              }}
+              style={styles.webview}
+              onMessage={(event) => {
+                if (event.nativeEvent.data === 'openExternal') {
+                  handleOpenWithExternalApp();
+                }
+              }}
+            />
+          );
+        }
+        // Online document
+        return (
+          <WebView
+            source={{ uri: file!.url }}
+            style={styles.webview}
+            startInLoadingState
+            renderLoading={() => (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#3b82f6" />
+                <Text style={styles.loadingText}>Loading...</Text>
+              </View>
+            )}
+          />
+        );
+
+      default:
+        return (
+          <View style={styles.unsupportedContainer}>
+            <Text style={styles.unsupportedText}>📄</Text>
+            <Text style={styles.unsupportedTitle}>Preview tidak tersedia</Text>
+            <Text style={styles.unsupportedSubtitle}>{file!.name}</Text>
+            <Pressable 
+              style={styles.downloadButton}
+              onPress={() => {
+                // Could implement download here
+                console.log('Download:', file!.url);
+              }}
+            >
+              <Text style={styles.downloadButtonText}>Download File</Text>
+            </Pressable>
+          </View>
+        );
+    }
+  };
+
+  if (!file) return null;
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      onRequestClose={onClose}
+      presentationStyle="fullScreen"
+    >
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.fileName} numberOfLines={1}>
+            {file!.name}
+          </Text>
+          <Pressable onPress={onClose} style={styles.closeButton}>
+            <Text style={styles.closeButtonText}>✕</Text>
+          </Pressable>
+        </View>
+
+        {/* Preview Content */}
+        <View style={styles.previewContainer}>
+          {renderPreview()}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1a1a1a',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingTop: 50, // Safe area
+  },
+  fileName: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginRight: 16,
+  },
+  closeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#333',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeButtonText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '300',
+  },
+  previewContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  video: {
+    width: width,
+    height: height - 100,
+  },
+  imageContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  image: {
+    width: width,
+    height: height - 100,
+  },
+  webview: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  loadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  unsupportedContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  unsupportedText: {
+    fontSize: 80,
+    marginBottom: 20,
+  },
+  unsupportedTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  unsupportedSubtitle: {
+    color: '#999',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  infoText: {
+    color: '#ccc',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  infoText2: {
+    color: '#999',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  downloadButton: {
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  downloadButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
