@@ -9,24 +9,16 @@ export const useOrientationLock = () => {
   useEffect(() => {
     const setOrientation = async () => {
       try {
-        if (isTablet) {
-          // For tablets, strongly prefer landscape mode
-          if (!isLandscape && !orientationSet) {
-            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
-            setOrientationSet(true);
-          }
-        } else {
-          // For phones, allow all orientations
-          await ScreenOrientation.unlockAsync();
-          setOrientationSet(false);
-        }
+        // Allow all orientations for all devices (both phone and tablet)
+        await ScreenOrientation.unlockAsync();
+        setOrientationSet(false);
       } catch (error) {
         console.log('Could not set screen orientation:', error);
       }
     };
 
     setOrientation();
-  }, [isTablet, isLandscape, orientationSet]);
+  }, [orientationSet]);
 
   // Reset orientation lock when switching between tablet/phone modes
   useEffect(() => {

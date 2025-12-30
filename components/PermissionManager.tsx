@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Platform, Alert, PermissionsAndroid } from 'react-native';
+import React, { useEffect } from 'react';
+import { Platform, Alert } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PERMISSION_ASKED_KEY = 'permissions_requested';
@@ -9,9 +10,8 @@ interface PermissionManagerProps {
 }
 
 export default function PermissionManager({ children }: PermissionManagerProps) {
-  const [permissionsChecked, setPermissionsChecked] = useState(false);
-
   useEffect(() => {
+    // Request permissions asynchronously; do not block initial render
     checkAndRequestPermissions();
   }, []);
 
@@ -22,58 +22,39 @@ export default function PermissionManager({ children }: PermissionManagerProps) 
       
       if (!hasAsked) {
         if (Platform.OS === 'android') {
-          // Request storage permissions for Android
+          // Prompt with SAF to select target folder (native system UI)
           Alert.alert(
-            'File Access Permission',
-            'This app needs access to your device storage to download and save files. Please grant permission in the next dialog.',
+            'Pilih Folder Penyimpanan',
+            'Di langkah berikut, buat atau pilih folder "LMS" di dalam Downloads agar file tersimpan rapi.',
             [
               {
-                text: 'Cancel',
+                text: 'Batal',
                 style: 'cancel',
                 onPress: async () => {
                   await AsyncStorage.setItem(PERMISSION_ASKED_KEY, 'true');
-                  setPermissionsChecked(true);
                 }
               },
               {
-                text: 'Grant Permission',
+                text: 'Pilih Folder',
                 onPress: async () => {
                   try {
-                    // Request proper storage permission using PermissionsAndroid
-                    const granted = await PermissionsAndroid.request(
-                      PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-                      {
-                        title: 'Storage Permission',
-                        message: 'This app needs access to storage to download files',
-                        buttonNeutral: 'Ask Me Later',
-                        buttonNegative: 'Cancel',
-                        buttonPositive: 'OK',
+                    const SAF = (FileSystem as any).StorageAccessFramework;
+                    if (SAF && typeof SAF.requestDirectoryPermissionsAsync === 'function') {
+                      const result = await SAF.requestDirectoryPermissionsAsync();
+                      if (result?.granted && result.directoryUri) {
+                        await AsyncStorage.setItem('downloads_directory_uri', result.directoryUri);
                       }
-                    );
-                    
-                    // Mark that we've asked for permissions
-                    await AsyncStorage.setItem(PERMISSION_ASKED_KEY, 'true');
-                    
-                    if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-                      console.log('Storage permission granted');
-                      Alert.alert(
-                        'Permission Granted',
-                        'Great! You can now download and save files from the app.',
-                        [{ text: 'OK' }]
-                      );
                     } else {
-                      console.log('Storage permission denied');
                       Alert.alert(
-                        'Permission Required',
-                        'Storage permission is needed to download files. You can enable it later in Settings → Apps → lms-nsg → Permissions.',
+                        'Unsupported Storage Access',
+                        'Versi FileSystem saat ini tidak mendukung pemilihan folder (SAF). File akan disimpan di penyimpanan aplikasi dan bisa dibuka via Share.',
                         [{ text: 'OK' }]
                       );
                     }
-                    setPermissionsChecked(true);
                   } catch (error) {
-                    console.error('Error requesting permissions:', error);
+                    console.error('SAF permission error:', error);
+                  } finally {
                     await AsyncStorage.setItem(PERMISSION_ASKED_KEY, 'true');
-                    setPermissionsChecked(true);
                   }
                 }
               }
@@ -90,25 +71,16 @@ export default function PermissionManager({ children }: PermissionManagerProps) 
                 text: 'Got it',
                 onPress: async () => {
                   await AsyncStorage.setItem(PERMISSION_ASKED_KEY, 'true');
-                  setPermissionsChecked(true);
                 }
               }
             ]
           );
         }
-      } else {
-        setPermissionsChecked(true);
       }
     } catch (error) {
       console.error('Error checking permissions:', error);
-      setPermissionsChecked(true);
     }
   };
-
-  // Show loading while checking permissions
-  if (!permissionsChecked) {
-    return null; // Or you can show a loading screen here
-  }
-
+  // Always render children; permission prompts are non-blocking
   return <>{children}</>;
 }

@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, Pressable, Alert, TouchableOpacity, RefreshControl, Platform } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { View, Text, ScrollView, Pressable, Alert, TouchableOpacity, RefreshControl, Platform, TextInput } from 'react-native';
+import * as Sharing from 'expo-sharing';
+// IntentLauncher removed; we use in-app viewing or sharing instead
+import { useFocusEffect } from '@react-navigation/native';
 import { Container } from 'components/Container';
 import { DownloadManager, DownloadedFile } from 'lib/DownloadManager';
 import FileThumbnail from 'components/FileThumbnail';
 import FilePreviewModal from 'components/FilePreviewModal';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../App';
+import PdfViewerModal from 'components/PdfViewerModal';
 import { useResponsive, getResponsiveStyle } from 'hooks/useResponsive';
+import { useAuth } from 'context/AuthContext';
+import { getBrandColors } from 'lib/theme';
 
 
 export default function DownloadScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [downloadedFiles, setDownloadedFiles] = useState<DownloadedFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -22,9 +24,13 @@ export default function DownloadScreen() {
     type: 'video' | 'image' | 'pdf' | 'document' | 'other';
   } | null>(null);
   const [previewVisible, setPreviewVisible] = useState(false);
+  const [pdfVisible, setPdfVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const { isTablet, isLandscape } = useResponsive();
   const responsiveStyle = getResponsiveStyle(isTablet, isLandscape);
+  const { userDomain } = useAuth();
+  const brandColors = getBrandColors(userDomain);
 
   useEffect(() => {
     loadDownloadedFiles();
@@ -75,57 +81,24 @@ export default function DownloadScreen() {
 
   const handleOpenWithExternalApp = async (file: DownloadedFile) => {
     try {
-      if (Platform.OS === 'ios') {
-        await Sharing.shareAsync(file.localUri);
-      } else {
-        // Android
-        const mimeType = getMimeType(file.name);
-        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-          data: file.localUri,
-          type: mimeType,
-          flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
-        });
-      }
+      await Sharing.shareAsync(file.localUri);
     } catch (error) {
       console.log('Error opening file:', error);
       Alert.alert('Error', 'Cannot open this file type. Try using the preview option.');
     }
   };
 
-  const getMimeType = (filename: string): string => {
-    const extension = filename.split('.').pop()?.toLowerCase();
-    switch (extension) {
-      case 'pdf': return 'application/pdf';
-      case 'doc': return 'application/msword';
-      case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      case 'xls': return 'application/vnd.ms-excel';
-      case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      case 'ppt': return 'application/vnd.ms-powerpoint';
-      case 'pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-      case 'jpg': case 'jpeg': return 'image/jpeg';
-      case 'png': return 'image/png';
-      case 'mp4': return 'video/mp4';
-      case 'mp3': return 'audio/mpeg';
-      default: return 'application/octet-stream';
-    }
-  };
+  // Removed getMimeType; using in-app viewer or share instead
 
   const handleFilePress = (file: DownloadedFile) => {
     const type = getFileType(file.fileType);
     if (type === 'pdf') {
-      navigation.navigate('PdfViewer', {
-        uri: file.localUri,
-        name: file.name,
-      });
-      return;
+      setPreviewFile({ url: file.localUri, name: file.name, type });
+      setPdfVisible(true);
+    } else {
+      setPreviewFile({ url: file.localUri, name: file.name, type });
+      setPreviewVisible(true);
     }
-
-    setPreviewFile({
-      url: file.localUri,
-      name: file.name,
-      type,
-    });
-    setPreviewVisible(true);
   };
 
   const getFileType = (fileType: string): 'video' | 'image' | 'pdf' | 'document' | 'other' => {
@@ -183,77 +156,96 @@ export default function DownloadScreen() {
     );
   };
 
-  const renderDownloadedFile = ({ item }: { item: DownloadedFile }) => (
-    <View style={[responsiveStyle.itemCard, { marginBottom: 12 }]}>
-      <Pressable
-        onPress={() => handleFilePress(item)}
-        className="bg-slate-800 rounded-xl active:bg-slate-700"
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const hasSearchQuery = normalizedQuery.length > 0;
+
+  const filteredFiles = hasSearchQuery
+    ? downloadedFiles.filter(file => file.name.toLowerCase().includes(normalizedQuery))
+    : downloadedFiles;
+  
+
+  const renderDownloadedFile = ({ item }: { item: DownloadedFile }) => {
+    const thumbSize = isTablet ? (isLandscape ? 170 : 140) : 120;
+
+    return (
+      <View
         style={{
-          padding: isTablet ? 16 : 12,
-          minHeight: isTablet ? 80 : 60,
+          paddingHorizontal: 4,
+          marginBottom: 16,
         }}
       >
-        <View className="flex-row items-center">
-          <View style={{ marginRight: 12 }}>
+        <View
+          className="bg-orange-50 rounded-2xl border border-orange-100 items-center shadow-sm"
+          style={{
+            paddingHorizontal: 8,
+            paddingTop: 8,
+            paddingBottom: 10,
+            minHeight: isTablet ? 220 : 220,
+          }}
+        >
+          <Pressable
+            onPress={() => handleFilePress(item)}
+            className="rounded-xl active:bg-orange-50 items-center justify-center w-full"
+            style={{
+              aspectRatio: 1,
+              padding: 8,
+            }}
+          >
             <FileThumbnail 
               name={item.name} 
-              size={isTablet ? 56 : 40} 
+              size={thumbSize}
+              uri={item.localUri}
+              type={getFileType(item.fileType)}
             />
-          </View>
-          
-          <View className="flex-1">
+          </Pressable>
+          <View className="mt-2 w-full items-center">
             <Text 
-              className="text-white font-medium"
-              style={{ fontSize: responsiveStyle.text.body }}
-              numberOfLines={isTablet ? 2 : 1}
+              className="text-gray-900 font-medium text-center"
+              style={{ fontSize: isTablet ? 11 : 9 }}
+              numberOfLines={2}
             >
               {item.name}
             </Text>
             <Text 
-              className="text-slate-400 mt-1"
-              style={{ fontSize: responsiveStyle.text.caption }}
+              className="text-gray-500 text-center mt-1"
+              style={{ fontSize: isTablet ? 10 : 8 }}
+              numberOfLines={1}
             >
-              {DownloadManager.formatFileSize(item.size)} • {new Date(item.downloadedAt).toLocaleDateString()}
+              {DownloadManager.formatFileSize(item.size)}
             </Text>
             <Text 
-              className="text-green-500 mt-1"
-              style={{ fontSize: responsiveStyle.text.caption }}
+              className="text-gray-400 text-center mt-1"
+              style={{ fontSize: isTablet ? 9 : 7 }}
+              numberOfLines={1}
             >
-              ✓ Available Offline
+              {new Date(item.downloadedAt).toLocaleDateString()}
             </Text>
           </View>
-          
-          <View className="flex-row ml-2">
+          <View className="mt-3 w-full flex-row gap-2">
             {Platform.OS === 'ios' && (
               <TouchableOpacity
-                onPress={(e) => {
-                  e.stopPropagation();
-                  handleOpenWithExternalApp(item);
-                }}
-                className="p-2 bg-blue-600 rounded-lg active:bg-blue-700 mr-2"
+                onPress={() => handleOpenWithExternalApp(item)}
+                className="flex-1 p-2 bg-blue-600 rounded-lg active:bg-blue-700"
               >
-                <Text className="text-white" style={{ fontSize: responsiveStyle.text.caption }}>
+                <Text className="text-white text-center" style={{ fontSize: isTablet ? 10 : 9 }}>
                   📤
                 </Text>
               </TouchableOpacity>
             )}
-            
             <TouchableOpacity
-              onPress={(e) => {
-                e.stopPropagation();
-                handleDeleteFile(item.id, item.name);
-              }}
-              className="p-2 bg-red-600 rounded-lg active:bg-red-700"
+              onPress={() => handleDeleteFile(item.id, item.name)}
+              className="flex-1 p-2 rounded-lg"
+              style={{ backgroundColor: brandColors.primary }}
             >
-              <Text className="text-white" style={{ fontSize: responsiveStyle.text.caption }}>
+              <Text className="text-white text-center" style={{ fontSize: isTablet ? 10 : 9 }}>
                 🗑️
               </Text>
             </TouchableOpacity>
           </View>
         </View>
-      </Pressable>
-    </View>
-  );
+      </View>
+    );
+  };
 
   return (
     <Container>
@@ -262,13 +254,13 @@ export default function DownloadScreen() {
         <View className="flex-row items-center justify-between mb-4">
           <View>
             <Text 
-              className="text-white font-bold"
+              className="text-gray-900 font-bold"
               style={{ fontSize: responsiveStyle.text.heading }}
             >
               Downloaded Files
             </Text>
             <Text 
-              className="text-slate-400"
+              className="text-gray-600"
               style={{ fontSize: responsiveStyle.text.body }}
             >
               {downloadedFiles.length} files • {DownloadManager.formatFileSize(totalSize)}
@@ -278,7 +270,8 @@ export default function DownloadScreen() {
           {downloadedFiles.length > 0 && (
             <TouchableOpacity
               onPress={handleClearAll}
-              className="px-4 py-2 bg-red-600 rounded-lg active:bg-red-700"
+              className="px-4 py-2 rounded-lg"
+              style={{ backgroundColor: brandColors.primary }}
             >
               <Text 
                 className="text-white font-medium"
@@ -290,10 +283,41 @@ export default function DownloadScreen() {
           )}
         </View>
 
+        {/* Search Bar */}
+        {downloadedFiles.length > 0 && (
+          <View style={{ marginBottom: isTablet ? 20 : 16 }}>
+            <View className="flex-row items-center bg-white border border-orange-200 rounded-lg px-3 py-2">
+              <Text style={{ fontSize: responsiveStyle.text.body, marginRight: 8 }}>🔍</Text>
+              <TextInput
+                placeholder="Cari file atau video..."
+                placeholderTextColor="#9CA3AF"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                style={{
+                  flex: 1,
+                  color: '#111827',
+                  fontSize: responsiveStyle.text.body,
+                  paddingVertical: 0,
+                }}
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+            </View>
+            {hasSearchQuery && filteredFiles.length === 0 && (
+              <Text
+                className="text-slate-400 mt-2"
+                style={{ fontSize: responsiveStyle.text.caption }}
+              >
+                {`Tidak ada hasil untuk "${searchQuery}".`}
+              </Text>
+            )}
+          </View>
+        )}
+
         {/* File List */}
         {loading ? (
           <View className="flex-1 items-center justify-center py-20">
-            <Text className="text-white" style={{ fontSize: responsiveStyle.text.body }}>
+            <Text className="text-gray-700" style={{ fontSize: responsiveStyle.text.body }}>
               Loading downloads...
             </Text>
           </View>
@@ -301,33 +325,32 @@ export default function DownloadScreen() {
           <View className="flex-1 items-center justify-center py-20">
             <Text className="text-6xl mb-4">📁</Text>
             <Text 
-              className="text-slate-400 text-center"
+              className="text-gray-600 text-center"
               style={{ fontSize: responsiveStyle.text.body }}
             >
               No downloaded files yet
             </Text>
             <Text 
-              className="text-slate-500 text-center mt-2"
+              className="text-gray-500 text-center mt-2"
               style={{ fontSize: responsiveStyle.text.caption }}
             >
               Download files from the Categories page to access them offline
             </Text>
             {Platform.OS === 'ios' && (
               <Text 
-                className="text-slate-400 text-center mt-4"
+                className="text-gray-500 text-center mt-4"
                 style={{ fontSize: responsiveStyle.text.caption }}
               >
                 💡 Downloaded files also appear in Files app → lms-nsg → Downloads
               </Text>
             )}
           </View>
+        ) : filteredFiles.length === 0 && hasSearchQuery ? (
+          // Sudah ditangani pesan di bawah search bar
+          <View />
         ) : (
-          <FlatList
-            data={downloadedFiles}
-            keyExtractor={(item) => item.id}
-            renderItem={renderDownloadedFile}
-            numColumns={responsiveStyle.cardGrid.numColumns}
-            key={`${responsiveStyle.cardGrid.numColumns}-${isLandscape}`}
+          <ScrollView
+            showsVerticalScrollIndicator={false}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
@@ -337,14 +360,21 @@ export default function DownloadScreen() {
             }
             contentContainerStyle={{ 
               paddingBottom: isTablet ? 24 : 16,
-              alignItems: isTablet ? undefined : 'stretch',
+              flexDirection: 'row',
+              flexWrap: 'wrap',
             }}
-            columnWrapperStyle={
-              responsiveStyle.cardGrid.numColumns > 1 
-                ? { justifyContent: 'space-between' } 
-                : undefined
-            }
-          />
+          >
+            {filteredFiles.map((file) => {
+              // Phone: 2 kolom biar card lebih besar, Tablet tetap lebih rapat
+              const colCount = isTablet ? (isLandscape ? 5 : 4) : 2;
+              const itemWidthPercent = 100 / colCount;
+              return (
+                <View key={file.id} style={{ width: `${itemWidthPercent}%` as any }}>
+                  {renderDownloadedFile({ item: file })}
+                </View>
+              );
+            })}
+          </ScrollView>
         )}
       </View>
 
@@ -355,6 +385,13 @@ export default function DownloadScreen() {
         onClose={() => {
           setPreviewVisible(false);
           setPreviewFile(null);
+        }}
+      />
+      <PdfViewerModal
+        visible={pdfVisible}
+        file={previewFile ? { url: previewFile.url, name: previewFile.name } : null}
+        onClose={() => {
+          setPdfVisible(false);
         }}
       />
     </Container>

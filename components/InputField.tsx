@@ -18,9 +18,9 @@ export default function InputField({ isPassword, style, className, ...props }: I
         secureTextEntry={secure}
         className={[
           // fixed height for easier vertical centering of icon
-          'h-12 w-full rounded-lg border border-gray-600 bg-transparent px-3 text-white',
+          'h-12 w-full rounded-lg border border-gray-300 bg-white px-3 text-gray-900',
           isPassword ? 'pr-12' : '',
-          'focus:border-blue-500',
+          'focus:border-red-500',
           className as string,
         ]
           .filter(Boolean)

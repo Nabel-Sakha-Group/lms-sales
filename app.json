@@ -3,32 +3,27 @@
     "name": "lms-nsg",
     "slug": "lms-nsg",
     "version": "1.0.0",
-
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/ICON NSG.png"
     },
-
     "experiments": {
       "tsconfigPaths": true
     },
-
     "plugins": [],
-
     "orientation": "default",
-    "icon": "./assets/icon.png",
-
+    "icon": "./assets/ICON NSG.png",
     "userInterfaceStyle": "light",
-
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/ICON NSG.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "requireFullScreen": false,
-      "orientation": ["landscape-left", "landscape-right", "portrait"],
       "infoPlist": {
         "UIFileSharingEnabled": true,
         "LSSupportsOpeningDocumentsInPlace": true
@@ -36,14 +31,22 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/ICON NSG.png",
         "backgroundColor": "#ffffff"
       },
-      "screenOrientation": "user",
       "permissions": [
         "WRITE_EXTERNAL_STORAGE",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
         "READ_EXTERNAL_STORAGE"
-      ]
-    }
+      ],
+      "package": "com.lmsnabel.lmsnsg"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a4c85791-60f5-473f-998f-a756c271cea8"
+      }
+    },
+    "owner": "lms-nabel"
   }
 }

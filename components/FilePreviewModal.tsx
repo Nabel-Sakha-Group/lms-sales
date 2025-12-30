@@ -134,9 +134,22 @@ export default function FilePreviewModal({ visible, onClose, file }: FilePreview
         );
 
       case 'pdf':
-        // PDF file types are now handled by PdfViewerScreen for a better native experience.
-        // This modal will only be used for non-PDF types.
-        return null;
+        // Show local PDF info and let user open via external reader app using Sharing API
+        return (
+          <View style={styles.downloadedContainer}>
+            <Text style={styles.downloadedIcon}>📄</Text>
+            <Text style={styles.downloadedTitle}>PDF Downloaded</Text>
+            <Text style={styles.downloadedSubtitle}>{file.name}</Text>
+            {Platform.OS === 'android' ? (
+              <Text style={styles.downloadedInfo}>📁 Location: Downloads → LMS-Sales</Text>
+            ) : (
+              <Text style={styles.downloadedInfo}>📁 Files app → lms-nsg → Downloads</Text>
+            )}
+            <Pressable style={styles.openButton} onPress={handleFileAction}>
+              <Text style={styles.openButtonText}>{Platform.OS === 'ios' ? 'Share or Save' : 'Open PDF'}</Text>
+            </Pressable>
+          </View>
+        );
 
       case 'document':
         return (

@@ -1,27 +1,23 @@
 import React from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
-import Pdf from 'react-native-pdf';
-import { RouteProp, useRoute } from '@react-navigation/native';
-import { RootStackParamList } from '../App';
-
-type PdfViewerRouteProp = RouteProp<RootStackParamList, 'PdfViewer'>;
+import { View, Text, StyleSheet } from 'react-native';
+// Removed native PDF viewer usage
+import { useRoute } from '@react-navigation/native';
 
 export default function PdfViewerScreen() {
-  const route = useRoute<PdfViewerRouteProp>();
-  const { uri, name } = route.params;
+  const route = useRoute<any>();
+  const name = route?.params?.name ?? 'PDF';
 
-  const source = { uri, cache: true };
+  // Placeholder: This screen is deprecated.
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title} numberOfLines={1}>{name}</Text>
       </View>
-      <Pdf
-        source={source}
-        style={styles.pdf}
-        trustAllCerts={Platform.OS === 'android'}
-      />
+      <View style={styles.deprecated}>
+        <Text style={styles.title}>PDF viewer removed</Text>
+        <Text style={{ color: '#9CA3AF', marginTop: 8 }}>Please use the Download modal to open PDFs with a reader app.</Text>
+      </View>
     </View>
   );
 }
@@ -42,8 +38,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  pdf: {
+  deprecated: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#111827',
   },
 });

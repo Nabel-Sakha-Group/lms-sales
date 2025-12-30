@@ -20,8 +20,8 @@ export class DownloadManager {
   static getDownloadsFolder() {
     if (!this._downloadsFolder) {
       if (Platform.OS === 'android') {
-        // Use device's public Downloads folder with app subfolder
-        this._downloadsFolder = `${FileSystem.documentDirectory}../../../storage/emulated/0/Download/LMS-Sales/`;
+        // Default to app documentDirectory; when SAF is granted we write to that URI instead
+        this._downloadsFolder = `${FileSystem.documentDirectory}Downloads/`;
       } else {
         // For iOS, use Documents folder with app-specific subfolder
         this._downloadsFolder = `${FileSystem.documentDirectory}Downloads/`;
@@ -57,8 +57,8 @@ export class DownloadManager {
   static async saveToMediaLibrary(localUri: string, filename: string): Promise<string | null> {
     try {
       if (Platform.OS === 'android') {
-        // File is already saved to public Downloads/LMS-Sales/ folder
-        console.log('Android: File saved to Downloads/LMS-Sales/ folder:', localUri);
+        // If using SAF, localUri will already be a content URI; otherwise app storage path
+        console.log('Android: File saved at:', localUri);
         return localUri;
       } else if (Platform.OS === 'ios') {
         // For iOS, files in documentDirectory are automatically available in Files app
@@ -75,16 +75,35 @@ export class DownloadManager {
   static async downloadFile(url: string, fileName: string, onProgress?: (progress: number) => void): Promise<DownloadedFile | null> {
     try {
       console.log('Starting download for:', fileName);
-      const DOWNLOADS_FOLDER = await this.initializeDownloadsFolder();
-      
+      // Ensure Android SAF directory is selected before proceeding to final save
+      if (Platform.OS === 'android') {
+        try {
+          const SAF = (FileSystem as any).StorageAccessFramework;
+          let directoryUri = await AsyncStorage.getItem('downloads_directory_uri');
+          if (SAF && !directoryUri) {
+            Alert.alert(
+              'Pilih Folder "LMS"',
+              'Sebelum mengunduh, pilih folder tujuan. Disarankan membuat/menentukan folder "LMS" di dalam Downloads.',
+              [{ text: 'OK' }]
+            );
+            const result = await SAF.requestDirectoryPermissionsAsync();
+            if (result?.granted && result.directoryUri) {
+              directoryUri = result.directoryUri as string;
+              await AsyncStorage.setItem('downloads_directory_uri', directoryUri);
+            } else {
+              console.log('SAF: directory permission not granted. Will keep app-local copy only.');
+            }
+          }
+        } catch (e) {
+          console.log('SAF pre-check error:', e);
+        }
+      }
       const fileId = Date.now().toString();
-      const localUri = DOWNLOADS_FOLDER + `${fileId}_${fileName}`;
-      console.log('Download URI:', localUri);
-      
-      // Start download
+      const tempTarget = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}${fileId}_${fileName}`;
+      // Download to a temporary app location first
       const downloadResumable = FileSystem.createDownloadResumable(
         url,
-        localUri,
+        tempTarget,
         {},
         (downloadProgress) => {
           const progress = downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite;
@@ -92,32 +111,83 @@ export class DownloadManager {
           onProgress?.(progress);
         }
       );
-
       console.log('Starting download...');
       const downloadResult = await downloadResumable.downloadAsync();
       console.log('Download result:', downloadResult);
       
       if (downloadResult && (downloadResult.status === 200 || downloadResult.status === 206)) {
         console.log('Download successful with status:', downloadResult.status, '(200=OK, 206=Partial Content)');
-        const fileInfo = await FileSystem.getInfoAsync(localUri);
-        console.log('File info:', fileInfo);
+        // Decide final destination
+        let finalUri = tempTarget;
+        let size = 0;
+        const tempInfo = await FileSystem.getInfoAsync(tempTarget);
+        size = 'size' in tempInfo ? (tempInfo.size as number) : 0;
+
+        if (Platform.OS === 'android') {
+          try {
+            const SAF = (FileSystem as any).StorageAccessFramework;
+            const directoryUri = await AsyncStorage.getItem('downloads_directory_uri');
+            if (SAF && directoryUri) {
+              // Ensure LMS subfolder exists; create or use picked directory directly
+              // Attempt to create file inside the selected directory
+              const mimeType = this.getMimeTypeFromName(fileName);
+              const safFileUri = await SAF.createFileAsync(directoryUri, fileName, mimeType);
+              const base64 = await FileSystem.readAsStringAsync(tempTarget, { encoding: FileSystem.EncodingType.Base64 });
+              await SAF.writeAsStringAsync(safFileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+              // Keep an app-local copy for in-app viewing
+              const DOWNLOADS_FOLDER = await this.initializeDownloadsFolder();
+              finalUri = DOWNLOADS_FOLDER + `${fileId}_${fileName}`;
+              await FileSystem.moveAsync({ from: tempTarget, to: finalUri });
+              const movedInfo = await FileSystem.getInfoAsync(finalUri);
+              size = 'size' in movedInfo ? (movedInfo.size as number) : size;
+              // Store SAF uri as publicUri by assigning after record creation
+              (downloadResult as any)._safUri = safFileUri;
+            } else {
+              console.log('SAF not available or directory not set. Saving to app storage only.');
+              const DOWNLOADS_FOLDER = await this.initializeDownloadsFolder();
+              finalUri = DOWNLOADS_FOLDER + `${fileId}_${fileName}`;
+              await FileSystem.moveAsync({ from: tempTarget, to: finalUri });
+              const movedInfo = await FileSystem.getInfoAsync(finalUri);
+              size = 'size' in movedInfo ? (movedInfo.size as number) : size;
+            }
+          } catch (e) {
+            console.error('SAF write error, keeping app storage file:', e);
+            // Fallback: move to app Downloads folder
+            const DOWNLOADS_FOLDER = await this.initializeDownloadsFolder();
+            finalUri = DOWNLOADS_FOLDER + `${fileId}_${fileName}`;
+            await FileSystem.moveAsync({ from: tempTarget, to: finalUri });
+            const movedInfo = await FileSystem.getInfoAsync(finalUri);
+            size = 'size' in movedInfo ? (movedInfo.size as number) : size;
+          }
+        } else {
+          // iOS: move to app Downloads folder for visibility in Files
+          const DOWNLOADS_FOLDER = await this.initializeDownloadsFolder();
+          finalUri = DOWNLOADS_FOLDER + `${fileId}_${fileName}`;
+          await FileSystem.moveAsync({ from: tempTarget, to: finalUri });
+          const movedInfo = await FileSystem.getInfoAsync(finalUri);
+          size = 'size' in movedInfo ? (movedInfo.size as number) : size;
+        }
         
         const downloadedFile: DownloadedFile = {
           id: fileId,
           name: fileName,
           originalUrl: url,
-          localUri: localUri,
-          size: 'size' in fileInfo ? fileInfo.size : 0,
+          localUri: finalUri,
+          size: size,
           downloadedAt: new Date().toISOString(),
           fileType: this.getFileType(fileName),
         };
 
         // Save to media library for file manager access
-        const publicUri = await this.saveToMediaLibrary(localUri, fileName);
+        const publicUri = await this.saveToMediaLibrary(finalUri, fileName);
         console.log('File saved to media library:', publicUri ? 'Success' : 'Failed');
 
         // Add public URI if available
-        if (publicUri) {
+        // Prefer SAF uri if available
+        const safUri = (downloadResult as any)?._safUri;
+        if (safUri) {
+          (downloadedFile as any).publicUri = safUri;
+        } else if (publicUri) {
           (downloadedFile as any).publicUri = publicUri;
         }
 
@@ -126,11 +196,19 @@ export class DownloadManager {
         console.log('Download completed and saved:', downloadedFile);
         
         // Show success message with file location info
-        setTimeout(() => {
+        setTimeout(async () => {
           if (Platform.OS === 'android') {
+            let folderHint = 'Selected folder';
+            try {
+              const dirUri = await AsyncStorage.getItem('downloads_directory_uri');
+              if (dirUri) {
+                // Best-effort hint: show "LMS" if user followed guidance
+                folderHint = dirUri.includes('LMS') ? 'LMS' : 'selected folder';
+              }
+            } catch {}
             Alert.alert(
               'Download Complete',
-              `${fileName} has been saved to:\n📁 Downloads → LMS-Sales → ${fileName}\n\n• View in Downloads tab\n• Access via File Manager`,
+              `${fileName} has been saved.\n\n• View in Downloads tab\n• Access via File Manager (${folderHint})`,
               [{ text: 'OK' }]
             );
           } else if (Platform.OS === 'ios') {
@@ -173,31 +251,75 @@ export class DownloadManager {
   static async getDownloadedFiles(): Promise<DownloadedFile[]> {
     try {
       const downloadsJson = await AsyncStorage.getItem(DOWNLOADS_KEY);
-      
-      if (downloadsJson) {
-        const downloads = JSON.parse(downloadsJson) as DownloadedFile[];
-        
-        // Verify files still exist (with minimal logging)
-        const validDownloads = [];
-        for (const download of downloads) {
-          try {
-            const fileInfo = await FileSystem.getInfoAsync(download.localUri);
-            if (fileInfo.exists) {
-              validDownloads.push(download);
+      const saved = downloadsJson ? (JSON.parse(downloadsJson) as DownloadedFile[]) : [];
+
+      // If Android SAF directory is set, prioritize listing files from that directory only
+      if (Platform.OS === 'android') {
+        try {
+          const SAF = (FileSystem as any).StorageAccessFramework;
+          const directoryUri = await AsyncStorage.getItem('downloads_directory_uri');
+          if (SAF && directoryUri) {
+            const childUris: string[] = await SAF.readDirectoryAsync(directoryUri);
+            const safDownloads: DownloadedFile[] = [];
+            for (const uri of childUris) {
+              let name = 'file';
+              let size = 0;
+              try {
+                const info = await SAF.getInfoAsync(uri);
+                if (info?.name) name = info.name as string;
+                if (typeof info?.size === 'number') size = info.size as number;
+              } catch {
+                const decoded = decodeURIComponent(uri);
+                const parts = decoded.split('/');
+                name = parts[parts.length - 1] || 'file';
+              }
+              const savedMatch = saved.find(s => s.name === name);
+              let localUri = savedMatch?.localUri;
+              if (!localUri) {
+                try {
+                  // Create/ensure app-local copy for in-app viewing
+                  const DOWNLOADS_FOLDER = await this.initializeDownloadsFolder();
+                  const localId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+                  localUri = DOWNLOADS_FOLDER + `${localId}_${name}`;
+                  const base64 = await SAF.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+                  await FileSystem.writeAsStringAsync(localUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+                  const info = await FileSystem.getInfoAsync(localUri);
+                  if (info && typeof (info as any).size === 'number') {
+                    size = (info as any).size as number;
+                  }
+                } catch (copyErr) {
+                  console.log('Failed to create app-local copy from SAF URI:', copyErr);
+                  localUri = uri; // fallback for external opening
+                }
+              }
+              safDownloads.push({
+                id: savedMatch?.id ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                name,
+                originalUrl: savedMatch?.originalUrl ?? '',
+                localUri,
+                size,
+                downloadedAt: savedMatch?.downloadedAt ?? new Date().toISOString(),
+                fileType: savedMatch?.fileType ?? this.getFileType(name),
+              } as DownloadedFile);
             }
-          } catch {
-            // Skip this file if we can't check it
+            return safDownloads;
           }
+        } catch (e) {
+          console.log('SAF listing error:', e);
         }
-        
-        // Update storage if some files were removed
-        if (validDownloads.length !== downloads.length) {
-          console.log(`Updated storage: ${validDownloads.length} valid files out of ${downloads.length}`);
-          await AsyncStorage.setItem(DOWNLOADS_KEY, JSON.stringify(validDownloads));
-        }
-        
-        return validDownloads;
       }
+
+      // Fallback: show validated app-local copies (iOS or Android without SAF)
+      const validDownloads: DownloadedFile[] = [];
+      for (const d of saved) {
+        try {
+          const info = await FileSystem.getInfoAsync(d.localUri);
+          if (info.exists) {
+            validDownloads.push(d);
+          }
+        } catch {}
+      }
+      return validDownloads;
     } catch (error) {
       console.error('Error getting downloaded files:', error);
     }
@@ -289,6 +411,25 @@ export class DownloadManager {
         return 'image';
       default:
         return 'file';
+    }
+  }
+
+  private static getMimeTypeFromName(fileName: string): string {
+    const ext = fileName.toLowerCase().split('.').pop();
+    switch (ext) {
+      case 'pdf': return 'application/pdf';
+      case 'doc': return 'application/msword';
+      case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'xls': return 'application/vnd.ms-excel';
+      case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'ppt': return 'application/vnd.ms-powerpoint';
+      case 'pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      case 'jpg':
+      case 'jpeg': return 'image/jpeg';
+      case 'png': return 'image/png';
+      case 'mp4': return 'video/mp4';
+      case 'mp3': return 'audio/mpeg';
+      default: return 'application/octet-stream';
     }
   }
 

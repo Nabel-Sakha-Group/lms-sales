@@ -1,8 +1,7 @@
 module.exports = function (api) {
   api.cache(true);
   let plugins = [];
-
-  plugins.push('react-native-worklets/plugin');
+  // Removed react-native-worklets plugin (not used)
   
   // Add react-native-dotenv untuk load environment variables dari .env
   plugins.push([
